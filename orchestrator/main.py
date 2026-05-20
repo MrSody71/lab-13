@@ -26,6 +26,7 @@ _REPLY_SUBJECTS = (
     "tickets.solution_found",
     "tickets.response_ready",
     "tickets.escalated",
+    "tickets.llm_enhanced",
 )
 
 
@@ -238,6 +239,19 @@ class AgentOrchestrator:
             )
             outcome_type = "response"
             logger.info("response generated ticket_id=%s", ticket_id)
+            if os.getenv("LLM_ENABLED", "false").lower() in ("1", "true", "yes"):
+                ctx.update(outcome)
+                outcome = await self._execute_step(
+                    self._make_step(
+                        "llm_enhance",
+                        "tickets.llm_enhance",
+                        "tickets.llm_enhanced",
+                    ),
+                    _build_payload("llm_enhance", ctx),
+                    ticket_id,
+                )
+                outcome_type = "llm_enhanced"
+                logger.info("llm enhanced ticket_id=%s", ticket_id)
         else:
             ctx["escalation_reason"] = (
                 "critical_priority" if found else "no_solution_found"
@@ -306,6 +320,16 @@ def _build_payload(step_name: str, ctx: dict) -> dict:
             "priority": ctx.get("priority"),
             "reason": ctx.get("escalation_reason", "no_solution_found"),
             "attempts": ctx.get("attempts", 1),
+        }
+
+    if step_name == "llm_enhance":
+        return {
+            "ticket_id": tid,
+            "title": ctx["title"],
+            "description": ctx.get("description", ""),
+            "category": ctx.get("category"),
+            "kb_articles": ctx.get("articles", []),
+            "draft_response": ctx.get("response_text", ""),
         }
 
     return {"ticket_id": tid}

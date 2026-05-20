@@ -87,3 +87,14 @@ services:
       - responder
       - escalation
     restart: on-failure
+
+  llm_agent:
+    build: ./llm_agent
+    profiles:
+      - llm
+    environment:
+      - NATS_URL=nats://nats:4222
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    depends_on:
+      - nats
+    restart: on-failure

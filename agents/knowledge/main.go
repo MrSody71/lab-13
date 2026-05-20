@@ -25,6 +25,19 @@ func main() {
 		defer shutdown(ctx)
 	}
 
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		redisURL = "redis://localhost:6379"
+	}
+
+	store, err := newRedisStore(redisURL)
+	if err != nil {
+		slog.Error("failed to configure Redis", "url", redisURL, "err", err)
+		os.Exit(1)
+	}
+	defer store.Close()
+	store.RestoreAndLogStats(ctx)
+
 	natsURL := os.Getenv("NATS_URL")
 	if natsURL == "" {
 		natsURL = nats.DefaultURL
@@ -61,18 +74,13 @@ func main() {
 
 		slog.Info("searching knowledge base", "ticket_id", req.TicketID, "category", req.Category)
 
-		articles, found := search(knowledgeBase, req.Category, req.Title, req.Description, 3)
+		resp, cacheHit := processQuery(ctx, store, req)
 
 		span.SetAttributes(
-			attribute.Bool("found", found),
-			attribute.Int("articles_returned", len(articles)),
+			attribute.Bool("found", resp.Found),
+			attribute.Int("articles_returned", len(resp.Articles)),
+			attribute.Bool("cache_hit", cacheHit),
 		)
-
-		resp := SolutionResponse{
-			TicketID: req.TicketID,
-			Articles: articles,
-			Found:    found,
-		}
 
 		payload, err := json.Marshal(resp)
 		if err != nil {
@@ -95,8 +103,9 @@ func main() {
 
 		slog.Info("solution search complete",
 			"ticket_id", req.TicketID,
-			"found", found,
-			"articles_returned", len(articles),
+			"found", resp.Found,
+			"articles_returned", len(resp.Articles),
+			"cache_hit", cacheHit,
 		)
 	})
 	if err != nil {
@@ -104,7 +113,31 @@ func main() {
 		os.Exit(1)
 	}
 
-	slog.Info("subscribed, waiting for requests", "subject", "tickets.find_solution")
+	_, err = nc.Subscribe("knowledge.stats", func(msg *nats.Msg) {
+		if msg.Reply == "" {
+			return
+		}
+		stats, err := store.GetStats(context.Background())
+		if err != nil {
+			slog.Error("failed to get stats", "err", err)
+			return
+		}
+		payload, err := json.Marshal(stats)
+		if err != nil {
+			return
+		}
+		if err := nc.Publish(msg.Reply, payload); err != nil {
+			slog.Error("failed to reply to stats request", "err", err)
+		}
+	})
+	if err != nil {
+		slog.Error("failed to subscribe", "subject", "knowledge.stats", "err", err)
+		os.Exit(1)
+	}
+
+	slog.Info("subscribed, waiting for requests",
+		"subjects", "tickets.find_solution, knowledge.stats",
+	)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)

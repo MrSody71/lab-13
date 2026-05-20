@@ -38,9 +38,11 @@ services:
       - NATS_URL=nats://nats:4222
       - OTEL_SERVICE_NAME=knowledge-agent
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      - REDIS_URL=redis://redis:6379
     depends_on:
       - nats
       - jaeger
+      - redis
     restart: on-failure
 
   responder:

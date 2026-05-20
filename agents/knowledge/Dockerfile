@@ -11,4 +11,5 @@ WORKDIR /app
 COPY --from=builder /app/knowledge .
 ENV OTEL_SERVICE_NAME=knowledge-agent
 ENV OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+ENV REDIS_URL=redis://localhost:6379
 CMD ["./knowledge"]

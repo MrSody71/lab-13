@@ -12,7 +12,8 @@
       "Bash(py --version)",
       "Bash(py -c \"import ast; ast.parse\\(open\\('C:/Homework/lab13-mas-support/orchestrator/pipeline.py'\\).read\\(\\)\\); print\\('pipeline.py OK'\\)\")",
       "Bash(py -c \"import ast; ast.parse\\(open\\('C:/Homework/lab13-mas-support/orchestrator/main.py'\\).read\\(\\)\\); print\\('main.py OK'\\)\")",
-      "Bash(py -m pip list)"
+      "Bash(py -m pip list)",
+      "Bash(py *)"
     ]
   }
 }

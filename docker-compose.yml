@@ -71,8 +71,14 @@ services:
     build: ./orchestrator
     environment:
       - NATS_URL=nats://nats:4222
+      - NATS_MONITOR_URL=http://nats:8222
       - OTEL_SERVICE_NAME=orchestrator
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      - CLASSIFIER_IMAGE=lab13-mas-support-classifier
+      - DOCKER_NETWORK=lab13-mas-support_default
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - nats
       - jaeger

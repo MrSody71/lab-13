@@ -14,6 +14,7 @@ from opentelemetry.propagate import inject, extract
 from opentelemetry.trace import StatusCode
 
 from pipeline import Pipeline, PipelineStep
+from scaler import AgentScaler
 from tracing import init_tracer
 
 load_dotenv()
@@ -307,13 +308,40 @@ async def _run() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    async with AgentOrchestrator() as orch:
-        result = await orch.process_ticket(
-            ticket_id="DEMO-001",
-            title="VPN not connecting",
-            description="Cannot connect to company VPN since this morning, tried restarting",
+
+    # Start the autoscaler as a background task.
+    scaler: AgentScaler | None = None
+    scaler_task: asyncio.Task | None = None
+    try:
+        scaler = AgentScaler()
+        scaler_task = asyncio.create_task(
+            scaler.monitor_queue_depth(), name="agent-scaler"
         )
-        print(json.dumps(result, indent=2))
+        logger.info("scaler background task started")
+    except Exception as exc:
+        logger.warning("scaler init failed (docker unavailable?): %s", exc)
+
+    try:
+        async with AgentOrchestrator() as orch:
+            result = await orch.process_ticket(
+                ticket_id="DEMO-001",
+                title="VPN not connecting",
+                description="Cannot connect to company VPN since this morning, tried restarting",
+            )
+            print(json.dumps(result, indent=2))
+
+            # Keep the process alive so the scaler continues to monitor.
+            try:
+                await asyncio.get_running_loop().create_future()
+            except asyncio.CancelledError:
+                pass
+    finally:
+        if scaler_task is not None:
+            scaler_task.cancel()
+            await asyncio.gather(scaler_task, return_exceptions=True)
+        if scaler is not None:
+            await scaler.stop_all_extra()
+        logger.info("orchestrator shutdown complete")
 
 
 if __name__ == "__main__":

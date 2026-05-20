@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,10 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 
 	"github.com/nats-io/nats.go"
 )
@@ -24,6 +29,15 @@ func newUUID() string {
 }
 
 func main() {
+	ctx := context.Background()
+
+	shutdown, err := initTracer(ctx)
+	if err != nil {
+		slog.Warn("tracer init failed, continuing without tracing", "err", err)
+	} else {
+		defer shutdown(ctx)
+	}
+
 	natsURL := os.Getenv("NATS_URL")
 	if natsURL == "" {
 		natsURL = nats.DefaultURL
@@ -38,12 +52,27 @@ func main() {
 
 	slog.Info("connected to NATS", "url", natsURL)
 
+	tracer := otel.Tracer("escalation")
+
 	_, err = nc.Subscribe("tickets.escalate", func(msg *nats.Msg) {
+		ctx, span := tracer.Start(extractCtx(msg), "process.tickets.escalate")
+		defer span.End()
+
 		var req EscalationRequest
 		if err := json.Unmarshal(msg.Data, &req); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			slog.Error("failed to decode request", "err", err)
 			return
 		}
+
+		span.SetAttributes(
+			attribute.String("ticket_id", req.TicketID),
+			attribute.String("category", req.Category),
+			attribute.String("priority", req.Priority),
+			attribute.Int("attempts", req.Attempts),
+			attribute.String("reason", req.Reason),
+		)
 
 		slog.Info("escalating ticket",
 			"ticket_id", req.TicketID,
@@ -55,18 +84,37 @@ func main() {
 
 		result, audit := escalate(req, time.Now(), newUUID())
 
+		span.SetAttributes(
+			attribute.String("escalated_to", result.EscalatedTo),
+			attribute.String("notification_time", result.NotificationTime),
+			attribute.String("escalation_id", result.EscalationID),
+		)
+
 		resultPayload, err := json.Marshal(result)
 		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			slog.Error("failed to encode result", "ticket_id", req.TicketID, "err", err)
 			return
 		}
-		if err := nc.Publish("tickets.escalated", resultPayload); err != nil {
+
+		out := nats.NewMsg("tickets.escalated")
+		out.Data = resultPayload
+		injectHeaders(ctx, out)
+
+		if err := nc.PublishMsg(out); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			slog.Error("failed to publish escalation", "ticket_id", req.TicketID, "err", err)
 			return
 		}
 
+		// Audit log also carries trace context for correlation.
 		if auditPayload, err := json.Marshal(audit); err == nil {
-			if err := nc.Publish("tickets.audit", auditPayload); err != nil {
+			auditMsg := nats.NewMsg("tickets.audit")
+			auditMsg.Data = auditPayload
+			injectHeaders(ctx, auditMsg)
+			if err := nc.PublishMsg(auditMsg); err != nil {
 				slog.Warn("audit publish failed", "ticket_id", req.TicketID, "err", err)
 			}
 		}

@@ -20,3 +20,62 @@ services:
       - "4318:4318"
     environment:
       - COLLECTOR_OTLP_ENABLED=true
+
+  classifier:
+    build: ./agents/classifier
+    environment:
+      - NATS_URL=nats://nats:4222
+      - OTEL_SERVICE_NAME=classifier-agent
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+    depends_on:
+      - nats
+      - jaeger
+    restart: on-failure
+
+  knowledge:
+    build: ./agents/knowledge
+    environment:
+      - NATS_URL=nats://nats:4222
+      - OTEL_SERVICE_NAME=knowledge-agent
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+    depends_on:
+      - nats
+      - jaeger
+    restart: on-failure
+
+  responder:
+    build: ./agents/responder
+    environment:
+      - NATS_URL=nats://nats:4222
+      - OTEL_SERVICE_NAME=responder-agent
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+    depends_on:
+      - nats
+      - jaeger
+    restart: on-failure
+
+  escalation:
+    build: ./agents/escalation
+    environment:
+      - NATS_URL=nats://nats:4222
+      - OTEL_SERVICE_NAME=escalation-agent
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+    depends_on:
+      - nats
+      - jaeger
+    restart: on-failure
+
+  orchestrator:
+    build: ./orchestrator
+    environment:
+      - NATS_URL=nats://nats:4222
+      - OTEL_SERVICE_NAME=orchestrator
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+    depends_on:
+      - nats
+      - jaeger
+      - classifier
+      - knowledge
+      - responder
+      - escalation
+    restart: on-failure

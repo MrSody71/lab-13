@@ -9,4 +9,6 @@ FROM alpine:3.19
 RUN apk --no-cache add ca-certificates
 WORKDIR /app
 COPY --from=builder /app/knowledge .
+ENV OTEL_SERVICE_NAME=knowledge-agent
+ENV OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 CMD ["./knowledge"]

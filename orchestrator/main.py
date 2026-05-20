@@ -10,8 +10,11 @@ from datetime import datetime, timezone
 
 import nats
 from dotenv import load_dotenv
+from opentelemetry.propagate import inject, extract
+from opentelemetry.trace import StatusCode
 
 from pipeline import Pipeline, PipelineStep
+from tracing import init_tracer
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -38,6 +41,7 @@ class AgentOrchestrator:
         self._nc = None
         # Keyed by (reply_subject, ticket_id) so concurrent tickets never collide
         self._pending: dict[tuple[str, str], asyncio.Future] = {}
+        self._tracer = init_tracer()
 
     # ── lifecycle ──────────────────────────────────────────────────────────────
 
@@ -74,7 +78,8 @@ class AgentOrchestrator:
                 return
             fut = self._pending.get((subject, ticket_id))
             if fut and not fut.done():
-                fut.set_result(data)
+                # Carry headers so _execute_step can extract the agent's trace context
+                fut.set_result((data, msg.headers or {}))
 
         return _handler
 
@@ -83,34 +88,63 @@ class AgentOrchestrator:
     async def _execute_step(
         self, step: PipelineStep, payload: dict, ticket_id: str
     ) -> dict:
-        key = (step.reply_subject, ticket_id)
-        for attempt in range(step.max_retries + 1):
-            fut: asyncio.Future = asyncio.get_running_loop().create_future()
-            self._pending[key] = fut
-            await self._nc.publish(
-                step.publish_subject, json.dumps(payload).encode()
-            )
-            try:
-                return await asyncio.wait_for(fut, timeout=step.timeout)
-            except asyncio.TimeoutError:
-                self._pending.pop(key, None)
-                if attempt < step.max_retries:
-                    logger.warning(
-                        "step '%s' timed out — attempt %d/%d ticket_id=%s",
-                        step.name, attempt + 1, step.max_retries, ticket_id,
+        with self._tracer.start_as_current_span(f"step.{step.name}") as span:
+            span.set_attribute("ticket_id", ticket_id)
+            span.set_attribute("subject", step.publish_subject)
+
+            key = (step.reply_subject, ticket_id)
+            for attempt in range(step.max_retries + 1):
+                fut: asyncio.Future = asyncio.get_running_loop().create_future()
+                self._pending[key] = fut
+
+                # Propagate current span context into the outgoing NATS message
+                headers: dict[str, str] = {}
+                inject(headers)
+
+                await self._nc.publish(
+                    step.publish_subject,
+                    json.dumps(payload).encode(),
+                    headers=headers,
+                )
+                span.add_event("task_sent", {"attempt": attempt + 1})
+
+                try:
+                    result_data, resp_headers = await asyncio.wait_for(
+                        fut, timeout=step.timeout
                     )
-                else:
-                    logger.error(
-                        "step '%s' exhausted %d retries ticket_id=%s",
-                        step.name, step.max_retries, ticket_id,
-                    )
-                    raise TimeoutError(
-                        f"step '{step.name}' failed after {step.max_retries} retries"
-                        f" (ticket_id={ticket_id})"
-                    )
-            except BaseException:
-                self._pending.pop(key, None)
-                raise
+                    span.add_event("result_received")
+                    # Record the agent's own trace ID for cross-service correlation
+                    if resp_headers and (tid := resp_headers.get("traceId")):
+                        span.set_attribute("agent.trace_id", tid)
+                    return result_data
+
+                except asyncio.TimeoutError:
+                    self._pending.pop(key, None)
+                    span.add_event("timeout", {"attempt": attempt + 1})
+                    if attempt < step.max_retries:
+                        span.add_event("retry_attempt", {"next_attempt": attempt + 2})
+                        logger.warning(
+                            "step '%s' timed out — attempt %d/%d ticket_id=%s",
+                            step.name, attempt + 1, step.max_retries, ticket_id,
+                        )
+                    else:
+                        logger.error(
+                            "step '%s' exhausted %d retries ticket_id=%s",
+                            step.name, step.max_retries, ticket_id,
+                        )
+                        span.set_status(
+                            StatusCode.ERROR,
+                            f"timed out after {step.max_retries} retries",
+                        )
+                        raise TimeoutError(
+                            f"step '{step.name}' failed after {step.max_retries} retries"
+                            f" (ticket_id={ticket_id})"
+                        )
+                except BaseException as exc:
+                    self._pending.pop(key, None)
+                    span.record_exception(exc)
+                    span.set_status(StatusCode.ERROR, str(exc))
+                    raise
 
     def _make_step(self, name: str, pub: str, reply: str) -> PipelineStep:
         return PipelineStep(
@@ -135,6 +169,17 @@ class AgentOrchestrator:
           3b. escalate       (if found=False OR priority=critical)
           4. publish tickets.completed
         """
+        with self._tracer.start_as_current_span("pipeline.process_ticket") as root_span:
+            root_span.set_attribute("ticket_id", ticket_id)
+            try:
+                return await self._run_pipeline(ticket_id, title, description)
+            except Exception as exc:
+                root_span.set_status(StatusCode.ERROR, str(exc))
+                raise
+
+    async def _run_pipeline(
+        self, ticket_id: str, title: str, description: str
+    ) -> dict:
         logger.info("processing ticket_id=%s", ticket_id)
 
         # Steps 1 & 2 run as a linear Pipeline

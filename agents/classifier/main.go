@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -8,10 +9,23 @@ import (
 	"sync/atomic"
 	"syscall"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+
 	"github.com/nats-io/nats.go"
 )
 
 func main() {
+	ctx := context.Background()
+
+	shutdown, err := initTracer(ctx)
+	if err != nil {
+		slog.Warn("tracer init failed, continuing without tracing", "err", err)
+	} else {
+		defer shutdown(ctx)
+	}
+
 	natsURL := os.Getenv("NATS_URL")
 	if natsURL == "" {
 		natsURL = nats.DefaultURL
@@ -26,24 +40,45 @@ func main() {
 
 	slog.Info("connected to NATS", "url", natsURL)
 
+	tracer := otel.Tracer("classifier")
 	var count atomic.Int64
 
 	_, err = nc.Subscribe("tickets.classify", func(msg *nats.Msg) {
+		ctx, span := tracer.Start(extractCtx(msg), "process.tickets.classify")
+		defer span.End()
+
 		var ticket Ticket
 		if err := json.Unmarshal(msg.Data, &ticket); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			slog.Error("failed to decode ticket", "err", err)
 			return
 		}
 
+		span.SetAttributes(attribute.String("ticket_id", ticket.TicketID))
+
 		result := classify(ticket)
+
+		span.SetAttributes(
+			attribute.String("category", result.Category),
+			attribute.String("priority", result.Priority),
+		)
 
 		payload, err := json.Marshal(result)
 		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			slog.Error("failed to encode classification", "ticket_id", ticket.TicketID, "err", err)
 			return
 		}
 
-		if err := nc.Publish("tickets.classified", payload); err != nil {
+		out := nats.NewMsg("tickets.classified")
+		out.Data = payload
+		injectHeaders(ctx, out)
+
+		if err := nc.PublishMsg(out); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			slog.Error("failed to publish classification", "ticket_id", ticket.TicketID, "err", err)
 			return
 		}

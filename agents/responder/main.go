@@ -1,16 +1,30 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+
 	"github.com/nats-io/nats.go"
 )
 
 func main() {
+	ctx := context.Background()
+
+	shutdown, err := initTracer(ctx)
+	if err != nil {
+		slog.Warn("tracer init failed, continuing without tracing", "err", err)
+	} else {
+		defer shutdown(ctx)
+	}
+
 	natsURL := os.Getenv("NATS_URL")
 	if natsURL == "" {
 		natsURL = nats.DefaultURL
@@ -25,12 +39,25 @@ func main() {
 
 	slog.Info("connected to NATS", "url", natsURL)
 
+	tracer := otel.Tracer("responder")
+
 	_, err = nc.Subscribe("tickets.generate_response", func(msg *nats.Msg) {
+		ctx, span := tracer.Start(extractCtx(msg), "process.tickets.generate_response")
+		defer span.End()
+
 		var req ResponseRequest
 		if err := json.Unmarshal(msg.Data, &req); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			slog.Error("failed to decode request", "err", err)
 			return
 		}
+
+		span.SetAttributes(
+			attribute.String("ticket_id", req.TicketID),
+			attribute.String("category", req.Category),
+			attribute.String("priority", req.Priority),
+		)
 
 		slog.Info("generating response",
 			"ticket_id", req.TicketID,
@@ -41,13 +68,26 @@ func main() {
 
 		result := generateResponse(req)
 
+		span.SetAttributes(
+			attribute.String("eta", result.EstimatedResolution),
+			attribute.Int("kb_refs", len(result.KBReferences)),
+		)
+
 		payload, err := json.Marshal(result)
 		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			slog.Error("failed to encode result", "ticket_id", req.TicketID, "err", err)
 			return
 		}
 
-		if err := nc.Publish("tickets.response_ready", payload); err != nil {
+		out := nats.NewMsg("tickets.response_ready")
+		out.Data = payload
+		injectHeaders(ctx, out)
+
+		if err := nc.PublishMsg(out); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			slog.Error("failed to publish result", "ticket_id", req.TicketID, "err", err)
 			return
 		}

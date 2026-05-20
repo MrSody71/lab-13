@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/nats-io/nats.go"
 )
@@ -38,12 +39,85 @@ func main() {
 	}
 	defer nc.Drain()
 
+	agentID := newAgentID()
+	slog.Info("agent identity", "agent_id", agentID)
 	slog.Info("connected to NATS", "url", natsURL)
 
 	tracer := otel.Tracer("classifier")
-	var count atomic.Int64
+	var queueDepth, count atomic.Int64
 
-	_, err = nc.Subscribe("tickets.classify", func(msg *nats.Msg) {
+	// classifyHandler is shared by both the broadcast and direct-inbox subscriptions.
+	classifyHandler := makeClassifyHandler(nc, tracer, &queueDepth, &count)
+
+	// Broadcast channel — used in non-auction (or fallback) mode.
+	if _, err = nc.Subscribe("tickets.classify", classifyHandler); err != nil {
+		slog.Error("failed to subscribe", "subject", "tickets.classify", "err", err)
+		os.Exit(1)
+	}
+
+	// Direct inbox — used when auction orchestrator selects this agent as winner.
+	if _, err = nc.Subscribe("agents.task."+agentID, classifyHandler); err != nil {
+		slog.Error("failed to subscribe", "subject", "agents.task."+agentID, "err", err)
+		os.Exit(1)
+	}
+
+	// Bid-request handler — responds to auction bid requests.
+	if _, err = nc.Subscribe("agents.bid_request", func(msg *nats.Msg) {
+		var req BidRequest
+		if err := json.Unmarshal(msg.Data, &req); err != nil {
+			slog.Warn("bid_request: failed to decode", "err", err)
+			return
+		}
+		if req.TaskType != "classify" {
+			return
+		}
+		depth := queueDepth.Load()
+		bid := computeBid(agentID, depth, depth > 0)
+		payload, err := json.Marshal(bid)
+		if err != nil {
+			return
+		}
+		if err := nc.Publish("agents.bid_response."+req.TaskID, payload); err != nil {
+			slog.Warn("bid publish failed", "task_id", req.TaskID, "err", err)
+			return
+		}
+		slog.Info("bid submitted",
+			"task_id", req.TaskID,
+			"agent_id", agentID,
+			"cost", bid.Cost,
+			"capacity", bid.Capacity,
+			"queue_depth", depth,
+		)
+	}); err != nil {
+		slog.Error("failed to subscribe", "subject", "agents.bid_request", "err", err)
+		os.Exit(1)
+	}
+
+	slog.Info("agent ready",
+		"agent_id", agentID,
+		"subjects", "tickets.classify, agents.bid_request, agents.task."+agentID,
+	)
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit
+
+	slog.Info("shutting down", "processed", count.Load())
+}
+
+// makeClassifyHandler returns the NATS handler used for both broadcast and
+// direct task delivery.  Extracted so the logic is shared across subscriptions
+// and easy to unit-test indirectly via classifier_test.go.
+func makeClassifyHandler(
+	nc *nats.Conn,
+	tracer trace.Tracer,
+	queueDepth *atomic.Int64,
+	count *atomic.Int64,
+) func(*nats.Msg) {
+	return func(msg *nats.Msg) {
+		queueDepth.Add(1)
+		defer queueDepth.Add(-1)
+
 		ctx, span := tracer.Start(extractCtx(msg), "process.tickets.classify")
 		defer span.End()
 
@@ -93,17 +167,5 @@ func main() {
 		if n%10 == 0 {
 			slog.Info("processed count milestone", "count", n)
 		}
-	})
-	if err != nil {
-		slog.Error("failed to subscribe", "subject", "tickets.classify", "err", err)
-		os.Exit(1)
 	}
-
-	slog.Info("subscribed, waiting for messages", "subject", "tickets.classify")
-
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
-	<-quit
-
-	slog.Info("shutting down", "processed", count.Load())
 }

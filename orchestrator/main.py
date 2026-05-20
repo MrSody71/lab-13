@@ -102,11 +102,7 @@ class AgentOrchestrator:
                 headers: dict[str, str] = {}
                 inject(headers)
 
-                await self._nc.publish(
-                    step.publish_subject,
-                    json.dumps(payload).encode(),
-                    headers=headers,
-                )
+                await self._publish_task(step, payload, headers, span)
                 span.add_event("task_sent", {"attempt": attempt + 1})
 
                 try:
@@ -146,6 +142,20 @@ class AgentOrchestrator:
                     span.record_exception(exc)
                     span.set_status(StatusCode.ERROR, str(exc))
                     raise
+
+    async def _publish_task(
+        self, step: PipelineStep, payload: dict, headers: dict, span
+    ) -> None:
+        """Publish a task to the appropriate NATS subject.
+
+        Subclasses can override this to replace direct broadcast with an
+        auction or other dispatch strategy.
+        """
+        await self._nc.publish(
+            step.publish_subject,
+            json.dumps(payload).encode(),
+            headers=headers,
+        )
 
     def _make_step(self, name: str, pub: str, reply: str) -> PipelineStep:
         return PipelineStep(
@@ -309,6 +319,15 @@ async def _run() -> None:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
 
+    use_auction = os.getenv("USE_AUCTION", "false").lower() in ("1", "true", "yes")
+    if use_auction:
+        from auction import AuctionOrchestrator
+        orch_class: type[AgentOrchestrator] = AuctionOrchestrator
+        logger.info("dispatch mode: auction")
+    else:
+        orch_class = AgentOrchestrator
+        logger.info("dispatch mode: broadcast")
+
     # Start the autoscaler as a background task.
     scaler: AgentScaler | None = None
     scaler_task: asyncio.Task | None = None
@@ -322,7 +341,7 @@ async def _run() -> None:
         logger.warning("scaler init failed (docker unavailable?): %s", exc)
 
     try:
-        async with AgentOrchestrator() as orch:
+        async with orch_class() as orch:
             result = await orch.process_ticket(
                 ticket_id="DEMO-001",
                 title="VPN not connecting",

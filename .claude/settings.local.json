@@ -15,7 +15,13 @@
       "Bash(py -m pip list)",
       "Bash(py *)",
       "PowerShell(Get-ChildItem -Path \"C:\\\\Homework\\\\lab13-mas-support\" -Recurse | Sort-Object FullName | ForEach-Object { if \\($_.PSIsContainer\\) { \"[DIR]  \" + $_.FullName } else { \"[FILE] \" + $_.FullName } })",
-      "Bash(docker compose *)"
+      "Bash(docker compose *)",
+      "Bash(python3 -c \"import ruff; print\\(ruff.__version__\\)\")",
+      "PowerShell(ruff *)",
+      "PowerShell(python --version)",
+      "PowerShell(Get-Command *)",
+      "PowerShell(py *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

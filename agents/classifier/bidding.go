@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 )
 
@@ -50,5 +50,5 @@ func newAgentID() string {
 	if err != nil || hostname == "" {
 		hostname = "classifier"
 	}
-	return fmt.Sprintf("%s-%04d", hostname, rand.Intn(9000)+1000)
+	return fmt.Sprintf("%s-%04d", hostname, rand.IntN(9000)+1000)
 }

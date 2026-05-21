@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import nats
 import redis.asyncio as aioredis
 from dotenv import load_dotenv
-from opentelemetry.propagate import inject, extract
+from opentelemetry.propagate import inject
 from opentelemetry.trace import StatusCode
 
 from pipeline import Pipeline, PipelineStep

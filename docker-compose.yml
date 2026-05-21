@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   nats:
     image: nats:2.10-alpine
@@ -7,11 +5,21 @@ services:
       - "4222:4222"
       - "8222:8222"
     command: ["--http_port", "8222"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   jaeger:
     image: jaegertracing/all-in-one:latest
@@ -28,8 +36,10 @@ services:
       - OTEL_SERVICE_NAME=classifier-agent
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
     depends_on:
-      - nats
-      - jaeger
+      nats:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
     restart: on-failure
 
   knowledge:
@@ -40,9 +50,12 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
       - REDIS_URL=redis://redis:6379
     depends_on:
-      - nats
-      - jaeger
-      - redis
+      nats:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+      redis:
+        condition: service_healthy
     restart: on-failure
 
   responder:
@@ -52,8 +65,10 @@ services:
       - OTEL_SERVICE_NAME=responder-agent
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
     depends_on:
-      - nats
-      - jaeger
+      nats:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
     restart: on-failure
 
   escalation:
@@ -63,8 +78,10 @@ services:
       - OTEL_SERVICE_NAME=escalation-agent
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
     depends_on:
-      - nats
-      - jaeger
+      nats:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
     restart: on-failure
 
   orchestrator:
@@ -81,13 +98,20 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
-      - nats
-      - jaeger
-      - redis
-      - classifier
-      - knowledge
-      - responder
-      - escalation
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+      classifier:
+        condition: service_started
+      knowledge:
+        condition: service_started
+      responder:
+        condition: service_started
+      escalation:
+        condition: service_started
     restart: on-failure
 
   dashboard:
@@ -99,8 +123,10 @@ services:
       - NATS_MONITOR_URL=http://nats:8222
       - REDIS_URL=redis://redis:6379
     depends_on:
-      - nats
-      - redis
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: on-failure
 
   llm_agent:
@@ -111,5 +137,6 @@ services:
       - NATS_URL=nats://nats:4222
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     depends_on:
-      - nats
+      nats:
+        condition: service_healthy
     restart: on-failure

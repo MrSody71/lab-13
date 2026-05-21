@@ -22,7 +22,8 @@ import (
 func newUUID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand: " + err.Error())
+		slog.Error("crypto/rand unavailable", "err", err)
+		os.Exit(1)
 	}
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // variant bits
@@ -62,7 +63,7 @@ func main() {
 
 	tracer := otel.Tracer("escalation")
 
-	_, err = nc.Subscribe("tickets.escalate", func(msg *nats.Msg) {
+	_, err = nc.QueueSubscribe("tickets.escalate", "escalation-group", func(msg *nats.Msg) {
 		ctx, span := tracer.Start(extractCtx(msg), "process.tickets.escalate")
 		defer span.End()
 

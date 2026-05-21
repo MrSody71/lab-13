@@ -64,7 +64,7 @@ func main() {
 
 	tracer := otel.Tracer("knowledge")
 
-	_, err = nc.Subscribe("tickets.find_solution", func(msg *nats.Msg) {
+	_, err = nc.QueueSubscribe("tickets.find_solution", "knowledge-group", func(msg *nats.Msg) {
 		ctx, span := tracer.Start(extractCtx(msg), "process.tickets.find_solution")
 		defer span.End()
 

@@ -30,6 +30,10 @@ _REPLY_SUBJECTS = (
     "tickets.llm_enhanced",
 )
 
+# tickets.audit is published by the escalation agent on every escalation event.
+# The orchestrator consumes and logs it so audit records are not silently dropped.
+_AUDIT_SUBJECT = "tickets.audit"
+
 
 class AgentOrchestrator:
     def __init__(
@@ -56,6 +60,7 @@ class AgentOrchestrator:
         for subject in _REPLY_SUBJECTS:
             await self._nc.subscribe(subject, cb=self._make_handler(subject))
         await self._nc.subscribe("tickets.incoming", cb=self._handle_incoming)
+        await self._nc.subscribe(_AUDIT_SUBJECT, cb=self._handle_audit)
         logger.info("connected nats_url=%s redis_url=%s", self._nats_url, self._redis_url)
 
     async def close(self) -> None:
@@ -91,6 +96,19 @@ class AgentOrchestrator:
                 fut.set_result((data, msg.headers or {}))
 
         return _handler
+
+    async def _handle_audit(self, msg) -> None:
+        """Consume escalation audit events so they are not silently discarded."""
+        try:
+            data = json.loads(msg.data)
+            logger.info(
+                "audit ticket_id=%s escalation_id=%s escalated_to=%s",
+                data.get("ticket_id"),
+                data.get("escalation_id"),
+                data.get("escalated_to"),
+            )
+        except Exception as exc:
+            logger.warning("audit handler error: %s", exc)
 
     async def _handle_incoming(self, msg) -> None:
         """Handle manually submitted tickets from the dashboard."""
@@ -368,10 +386,12 @@ def _build_payload(step_name: str, ctx: dict) -> dict:
 # ── entry point ────────────────────────────────────────────────────────────────
 
 async def _run() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    _fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    _console = logging.StreamHandler()
+    _console.setFormatter(_fmt)
+    _file = logging.FileHandler("orchestrator.log")
+    _file.setFormatter(_fmt)
+    logging.basicConfig(level=logging.INFO, handlers=[_console, _file])
 
     use_auction = os.getenv("USE_AUCTION", "false").lower() in ("1", "true", "yes")
     if use_auction:

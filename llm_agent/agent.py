@@ -6,6 +6,8 @@ import asyncio
 import json
 import logging
 import os
+import socket
+import time
 
 import nats
 from dotenv import load_dotenv
@@ -26,6 +28,9 @@ class LLMSupportAgent:
     def __init__(self, nats_url: str | None = None) -> None:
         self._nats_url = nats_url or os.getenv("NATS_URL", "nats://localhost:4222")
         self._nc = None
+        self._processed = 0
+        hostname = socket.gethostname() or "llm_agent"
+        self._agent_id = f"llm_agent-{hostname}"
         api_key = os.getenv("ANTHROPIC_API_KEY", "")
         if api_key:
             import anthropic
@@ -38,6 +43,22 @@ class LLMSupportAgent:
         self._nc = await nats.connect(self._nats_url)
         await self._nc.subscribe("tickets.llm_enhance", cb=self._handle)
         logger.info("connected nats_url=%s", self._nats_url)
+        asyncio.create_task(self._heartbeat_loop())
+
+    async def _heartbeat_loop(self) -> None:
+        while self._nc and not self._nc.is_closed:
+            hb = json.dumps({
+                "agent_id": self._agent_id,
+                "type": "llm_agent",
+                "status": "healthy",
+                "processed": self._processed,
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }).encode()
+            try:
+                await self._nc.publish("agents.heartbeat", hb)
+            except Exception:
+                pass
+            await asyncio.sleep(5)
 
     async def close(self) -> None:
         if self._nc:
@@ -73,6 +94,7 @@ class LLMSupportAgent:
             "model_used": model_used,
         }
         await self._nc.publish("tickets.llm_enhanced", json.dumps(result).encode())
+        self._processed += 1
         logger.info("llm enhanced ticket_id=%s model=%s", ticket_id, model_used)
 
     def _enhance(
@@ -113,10 +135,12 @@ class LLMSupportAgent:
 
 
 async def _run() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    _fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    _console = logging.StreamHandler()
+    _console.setFormatter(_fmt)
+    _file = logging.FileHandler("llm_agent.log")
+    _file.setFormatter(_fmt)
+    logging.basicConfig(level=logging.INFO, handlers=[_console, _file])
     async with LLMSupportAgent() as agent:  # noqa: F841
         logger.info("LLM agent ready")
         try:

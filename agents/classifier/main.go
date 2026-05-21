@@ -51,7 +51,8 @@ func main() {
 	classifyHandler := makeClassifyHandler(nc, tracer, &queueDepth, &count)
 
 	// Broadcast channel — used in non-auction (or fallback) mode.
-	if _, err = nc.Subscribe("tickets.classify", classifyHandler); err != nil {
+	// QueueSubscribe ensures only one replica handles each message when scaled.
+	if _, err = nc.QueueSubscribe("tickets.classify", "classifier-group", classifyHandler); err != nil {
 		slog.Error("failed to subscribe", "subject", "tickets.classify", "err", err)
 		os.Exit(1)
 	}

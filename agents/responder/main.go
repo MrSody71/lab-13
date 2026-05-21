@@ -50,7 +50,7 @@ func main() {
 
 	tracer := otel.Tracer("responder")
 
-	_, err = nc.Subscribe("tickets.generate_response", func(msg *nats.Msg) {
+	_, err = nc.QueueSubscribe("tickets.generate_response", "responder-group", func(msg *nats.Msg) {
 		ctx, span := tracer.Start(extractCtx(msg), "process.tickets.generate_response")
 		defer span.End()
 

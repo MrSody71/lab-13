@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -16,9 +17,17 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 load_dotenv()
+
+_fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+_console = logging.StreamHandler()
+_console.setFormatter(_fmt)
+_file = logging.FileHandler("dashboard.log")
+_file.setFormatter(_fmt)
+logging.basicConfig(level=logging.INFO, handlers=[_console, _file])
+logger = logging.getLogger(__name__)
 
 NATS_URL = os.getenv("NATS_URL", "nats://localhost:4222")
 NATS_MONITOR_URL = os.getenv("NATS_MONITOR_URL", "http://nats:8222")
@@ -41,7 +50,7 @@ async def lifespan(app: FastAPI):
         )
         await _nc.subscribe("agents.heartbeat", cb=_heartbeat_handler)
     except Exception as exc:
-        print(f"[dashboard] NATS connect failed: {exc}")
+        logger.warning("NATS connect failed: %s", exc)
     yield
     if _nc and not _nc.is_closed:
         await _nc.drain()
@@ -60,8 +69,8 @@ async def _heartbeat_handler(msg) -> None:
         if agent_id:
             data["last_seen"] = datetime.now(timezone.utc).isoformat()
             _agents[agent_id] = data
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("heartbeat parse error: %s", exc)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -100,8 +109,8 @@ async def get_status():
         if _nc and not _nc.is_closed:
             reply = await _nc.request("knowledge.stats", b"", timeout=3.0)
             redis_stats = json.loads(reply.data)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("knowledge.stats request failed: %s", exc)
 
     now = datetime.now(timezone.utc)
     active_agents = []
@@ -109,7 +118,7 @@ async def get_status():
         try:
             last_seen = datetime.fromisoformat(data.get("last_seen", ""))
             age = (now - last_seen).total_seconds()
-        except Exception:
+        except (ValueError, TypeError):
             age = 9999.0
         active_agents.append({
             **data,
@@ -137,8 +146,8 @@ async def get_tickets():
 
 
 class TicketInput(BaseModel):
-    title: str
-    description: str
+    title: str = Field(..., min_length=1, max_length=200)
+    description: str = Field(..., min_length=1, max_length=2000)
 
 
 @app.post("/api/tickets")

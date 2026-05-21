@@ -9,6 +9,7 @@ import os
 from datetime import datetime, timezone
 
 import nats
+import redis.asyncio as aioredis
 from dotenv import load_dotenv
 from opentelemetry.propagate import inject, extract
 from opentelemetry.trace import StatusCode
@@ -38,9 +39,11 @@ class AgentOrchestrator:
         max_retries: int = 3,
     ) -> None:
         self._nats_url = nats_url or os.getenv("NATS_URL", "nats://localhost:4222")
+        self._redis_url = os.getenv("REDIS_URL", "redis://redis:6379")
         self._step_timeout = step_timeout
         self._max_retries = max_retries
         self._nc = None
+        self._redis = None
         # Keyed by (reply_subject, ticket_id) so concurrent tickets never collide
         self._pending: dict[tuple[str, str], asyncio.Future] = {}
         self._tracer = init_tracer()
@@ -48,14 +51,18 @@ class AgentOrchestrator:
     # ── lifecycle ──────────────────────────────────────────────────────────────
 
     async def connect(self) -> None:
+        self._redis = aioredis.from_url(self._redis_url, decode_responses=True)
         self._nc = await nats.connect(self._nats_url)
         for subject in _REPLY_SUBJECTS:
             await self._nc.subscribe(subject, cb=self._make_handler(subject))
-        logger.info("connected nats_url=%s", self._nats_url)
+        await self._nc.subscribe("tickets.incoming", cb=self._handle_incoming)
+        logger.info("connected nats_url=%s redis_url=%s", self._nats_url, self._redis_url)
 
     async def close(self) -> None:
         if self._nc:
             await self._nc.drain()
+        if self._redis:
+            await self._redis.aclose()
 
     async def __aenter__(self) -> AgentOrchestrator:
         await self.connect()
@@ -84,6 +91,19 @@ class AgentOrchestrator:
                 fut.set_result((data, msg.headers or {}))
 
         return _handler
+
+    async def _handle_incoming(self, msg) -> None:
+        """Handle manually submitted tickets from the dashboard."""
+        try:
+            data = json.loads(msg.data)
+            asyncio.create_task(self.process_ticket(
+                ticket_id=data["ticket_id"],
+                title=data["title"],
+                description=data["description"],
+            ))
+            logger.info("incoming ticket queued ticket_id=%s", data.get("ticket_id"))
+        except Exception as exc:
+            logger.warning("incoming ticket handler error: %s", exc)
 
     # ── step execution with retry ──────────────────────────────────────────────
 
@@ -192,6 +212,7 @@ class AgentOrchestrator:
     async def _run_pipeline(
         self, ticket_id: str, title: str, description: str
     ) -> dict:
+        started_at = datetime.now(timezone.utc)
         logger.info("processing ticket_id=%s", ticket_id)
 
         # Steps 1 & 2 run as a linear Pipeline
@@ -268,6 +289,7 @@ class AgentOrchestrator:
             )
 
         # Step 4: broadcast completion event
+        completed_at = datetime.now(timezone.utc)
         result = {
             "ticket_id": ticket_id,
             "title": title,
@@ -276,10 +298,18 @@ class AgentOrchestrator:
             "found": found,
             "outcome_type": outcome_type,
             "outcome": outcome,
-            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "completed_at": completed_at.isoformat(),
+            "latency_ms": int((completed_at - started_at).total_seconds() * 1000),
         }
         await self._nc.publish("tickets.completed", json.dumps(result).encode())
-        logger.info("completed ticket_id=%s outcome=%s", ticket_id, outcome_type)
+        if self._redis:
+            try:
+                await self._redis.lpush("tickets:history", json.dumps(result))
+                await self._redis.ltrim("tickets:history", 0, 49)
+            except Exception as exc:
+                logger.warning("ticket history save failed: %s", exc)
+        logger.info("completed ticket_id=%s outcome=%s latency_ms=%d",
+                    ticket_id, outcome_type, result["latency_ms"])
         return result
 
 

@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -97,6 +98,21 @@ func main() {
 		"agent_id", agentID,
 		"subjects", "tickets.classify, agents.bid_request, agents.task."+agentID,
 	)
+
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			hb, _ := json.Marshal(map[string]any{
+				"agent_id":  agentID,
+				"type":      "classifier",
+				"status":    "healthy",
+				"processed": count.Load(),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			})
+			_ = nc.Publish("agents.heartbeat", hb)
+		}
+	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)

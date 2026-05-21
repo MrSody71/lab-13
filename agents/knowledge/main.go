@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -52,6 +54,13 @@ func main() {
 
 	slog.Info("connected to NATS", "url", natsURL)
 	slog.Info("knowledge base loaded", "articles", len(knowledgeBase))
+
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "unknown"
+	}
+	agentID := "knowledge-" + hostname
+	var count atomic.Int64
 
 	tracer := otel.Tracer("knowledge")
 
@@ -101,6 +110,7 @@ func main() {
 			return
 		}
 
+		count.Add(1)
 		slog.Info("solution search complete",
 			"ticket_id", req.TicketID,
 			"found", resp.Found,
@@ -138,6 +148,21 @@ func main() {
 	slog.Info("subscribed, waiting for requests",
 		"subjects", "tickets.find_solution, knowledge.stats",
 	)
+
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			hb, _ := json.Marshal(map[string]any{
+				"agent_id":  agentID,
+				"type":      "knowledge",
+				"status":    "healthy",
+				"processed": count.Load(),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			})
+			_ = nc.Publish("agents.heartbeat", hb)
+		}
+	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)

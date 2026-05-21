@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -51,6 +52,13 @@ func main() {
 	defer nc.Drain()
 
 	slog.Info("connected to NATS", "url", natsURL)
+
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "unknown"
+	}
+	agentID := fmt.Sprintf("escalation-%s", hostname)
+	var count atomic.Int64
 
 	tracer := otel.Tracer("escalation")
 
@@ -119,6 +127,7 @@ func main() {
 			}
 		}
 
+		count.Add(1)
 		slog.Info("ticket escalated",
 			"ticket_id", result.TicketID,
 			"escalated_to", result.EscalatedTo,
@@ -132,6 +141,21 @@ func main() {
 	}
 
 	slog.Info("subscribed, waiting for requests", "subject", "tickets.escalate")
+
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			hb, _ := json.Marshal(map[string]any{
+				"agent_id":  agentID,
+				"type":      "escalation",
+				"status":    "healthy",
+				"processed": count.Load(),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			})
+			_ = nc.Publish("agents.heartbeat", hb)
+		}
+	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)

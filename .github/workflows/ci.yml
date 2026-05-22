@@ -26,12 +26,13 @@ jobs:
           go-version: "1.24"
           cache-dependency-path: agents/${{ matrix.agent }}/go.sum
 
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
+            | sh -s -- -b $(go env GOPATH)/bin v1.64.8
+
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: v1.64.8
-          working-directory: agents/${{ matrix.agent }}
-          args: --timeout=5m
+        run: golangci-lint run --timeout=5m ./...
 
       - name: go test
         run: go test -race -count=1 ./...

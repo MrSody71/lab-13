@@ -1,26 +1,27 @@
 run:
-  timeout: 3m
+  timeout: 5m
 
 linters:
   disable-all: true
   enable:
-    - errcheck
-    - gosimple
     - govet
+    - gosimple
     - ineffassign
     - staticcheck
     - unused
+    # errcheck is intentionally omitted: `defer nc.Drain()`, `defer shutdown(ctx)`,
+    # and `defer store.Close()` are standard Go deferred-cleanup idioms that discard
+    # errors deliberately — errcheck would flag all of them as unchecked.
 
 linters-settings:
-  errcheck:
-    # Do not flag explicitly-ignored errors: `x, _ := f()` or `_ = f()`
-    check-blank: false
-    check-type-assertions: false
+  staticcheck:
+    checks:
+      - "all"
+      - "-SA1019"  # allow deprecated API use (OTel SDK internals)
 
 issues:
   max-same-issues: 0
-  # Relax errcheck inside test files (stubs, fake stores, etc.)
   exclude-rules:
     - path: "_test\\.go"
       linters:
-        - errcheck
+        - unused

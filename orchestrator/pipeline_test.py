@@ -132,6 +132,16 @@ for _mod_name, _attrs in (
         setattr(_m, _k, _v)
     sys.modules.setdefault(_mod_name, _m)
 
+# main.py does `from dotenv import load_dotenv` and calls load_dotenv() at import
+# time — the stub needs to be callable.
+_dotenv = sys.modules["dotenv"]
+_dotenv.load_dotenv = lambda *a, **kw: None  # type: ignore[attr-defined]
+
+# main.py does `from opentelemetry.propagate import inject`
+_otel_propagate = sys.modules["opentelemetry.propagate"]
+_otel_propagate.inject = lambda *a, **kw: None  # type: ignore[attr-defined]
+
+# main.py does `from opentelemetry.trace import StatusCode`
 _otel_trace = sys.modules["opentelemetry.trace"]
 _otel_trace.StatusCode = type("StatusCode", (), {"ERROR": "ERROR"})  # type: ignore[attr-defined]
 

@@ -1,0 +1,26 @@
+run:
+  timeout: 3m
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+linters-settings:
+  errcheck:
+    # Do not flag explicitly-ignored errors: `x, _ := f()` or `_ = f()`
+    check-blank: false
+    check-type-assertions: false
+
+issues:
+  max-same-issues: 0
+  # Relax errcheck inside test files (stubs, fake stores, etc.)
+  exclude-rules:
+    - path: "_test\\.go"
+      linters:
+        - errcheck

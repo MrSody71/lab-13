@@ -5,6 +5,9 @@ Run with:  pytest orchestrator/ --asyncio-mode=auto
 """
 from __future__ import annotations
 
+import sys
+import types
+
 import pytest
 
 from pipeline import Pipeline, PipelineStep
@@ -63,7 +66,6 @@ class TestPipeline:
         async def runner(step: PipelineStep, ctx: dict) -> dict:
             if step.name == "classify":
                 return {"category": "network", "priority": "critical"}
-            # find_solution can read classify output
             assert ctx["category"] == "network"
             assert ctx["priority"] == "critical"
             return {"found": False}
@@ -98,16 +100,12 @@ class TestPipeline:
         p.add_step(PipelineStep("x", "p.x", "r.x"))
         steps = p.steps
         steps.clear()
-        # Original list inside Pipeline is unaffected
         assert len(p.steps) == 1
 
 
 # ── _build_payload ─────────────────────────────────────────────────────────────
-# We import _build_payload from main.py using the same dependency-stubbing
-# technique as auction_test.py so no live NATS/Redis/OTel is required.
-
-import sys
-import types
+# Stub heavy dependencies so main.py can be imported without live services.
+# All stubs are registered before the import below.
 
 for _mod in (
     "nats", "nats.aio", "nats.aio.client",
@@ -125,7 +123,6 @@ for _mod in (
 ):
     sys.modules.setdefault(_mod, types.ModuleType(_mod))
 
-# Provide minimal stubs for local modules imported by main.py
 for _mod_name, _attrs in (
     ("scaler", {"AgentScaler": type("AgentScaler", (), {})}),
     ("tracing", {"init_tracer": lambda: None}),
@@ -135,11 +132,9 @@ for _mod_name, _attrs in (
         setattr(_m, _k, _v)
     sys.modules.setdefault(_mod_name, _m)
 
-# Stub opentelemetry.trace.StatusCode
 _otel_trace = sys.modules["opentelemetry.trace"]
 _otel_trace.StatusCode = type("StatusCode", (), {"ERROR": "ERROR"})  # type: ignore[attr-defined]
 
-# pipeline module is real, but ensure it's registered
 sys.modules.setdefault("pipeline", __import__("pipeline"))
 
 from main import _build_payload  # noqa: E402

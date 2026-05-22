@@ -1,5 +1,13 @@
 # Lab 13 — Multi-Agent System: IT Support Automation
 
+**Student:** Артюх Виталий Валериевич  
+**Group:** 221131  
+**Variant:** 2 — Автоматизация техподдержки  
+**Difficulty:** Повышенная  
+**Agents:** Классификация тикетов, Поиск по базе знаний, Генерация ответов, Эскалация
+
+---
+
 ## Overview
 
 This project implements an automated IT support ticketing system built on a **multi-agent architecture**. Incoming support tickets are processed through a sequential pipeline of specialized agents — classifier, knowledge base lookup, response generation, and escalation — all coordinated by a central orchestrator over NATS pub/sub messaging. Redis provides shared state and ticket history. OpenTelemetry traces flow to Jaeger for end-to-end visibility. An optional LLM agent (Claude via Anthropic API) polishes generated responses, and a FastAPI dashboard provides real-time monitoring and manual ticket submission.
@@ -106,6 +114,13 @@ flowchart TD
 ### Quick Start
 
 ```bash
+# Clone the repository
+git clone https://github.com/MrSody71/lab-13.git
+cd lab-13
+
+# Copy the environment template and fill in your values
+cp .env.example .env
+
 # Build and start all services
 docker compose up --build
 
@@ -237,6 +252,7 @@ lab13-mas-support/
 │   ├── scaler.py
 │   ├── tracing.py
 │   ├── auction_test.py
+│   ├── pipeline_test.py
 │   ├── Dockerfile
 │   └── requirements.txt
 ├── llm_agent/               # Python — Anthropic API response enhancement
@@ -249,7 +265,15 @@ lab13-mas-support/
 │   │   └── index.html
 │   ├── Dockerfile
 │   └── requirements.txt
+├── .env.example
+├── .github/
+│   └── workflows/
+│       └── ci.yml
 ├── docker-compose.yml
 ├── prompt_log.md
 └── README.md
 ```
+
+## Development Log
+
+All AI-assisted prompts and their results are recorded in [`prompt_log.md`](./prompt_log.md).

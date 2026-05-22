@@ -29,9 +29,9 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.64.1
+          version: v1.64.8
           working-directory: agents/${{ matrix.agent }}
-          args: --timeout=3m
+          args: --timeout=5m
 
       - name: go test
         run: go test -race -count=1 ./...

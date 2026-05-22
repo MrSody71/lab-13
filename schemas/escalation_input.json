@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EscalationInput",
+  "description": "Escalation request sent to tickets.escalate",
+  "type": "object",
+  "required": ["ticket_id", "category", "priority", "reason", "attempts"],
+  "additionalProperties": false,
+  "properties": {
+    "ticket_id": { "type": "string" },
+    "category":  { "type": "string", "enum": ["network", "hardware", "software", "account", "other"] },
+    "priority":  { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+    "reason": {
+      "type": "string",
+      "enum": ["critical_priority", "no_solution_found"],
+      "description": "Why the ticket is being escalated"
+    },
+    "attempts": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of solution-finding attempts before escalation"
+    }
+  }
+}

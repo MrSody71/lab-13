@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "KnowledgeInput",
+  "description": "Solution search request sent to tickets.find_solution",
+  "type": "object",
+  "required": ["ticket_id", "category", "title", "description"],
+  "additionalProperties": false,
+  "properties": {
+    "ticket_id": {
+      "type": "string"
+    },
+    "category": {
+      "type": "string",
+      "enum": ["network", "hardware", "software", "account", "other"]
+    },
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    }
+  }
+}

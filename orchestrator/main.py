@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
+from typing import Any, Callable, Coroutine
 
 import nats
 import redis.asyncio as aioredis
@@ -50,6 +51,7 @@ class AgentOrchestrator:
         self._redis = None
         # Keyed by (reply_subject, ticket_id) so concurrent tickets never collide
         self._pending: dict[tuple[str, str], asyncio.Future] = {}
+        self._processed_count: int = 0
         self._tracer = init_tracer()
 
     # ── lifecycle ──────────────────────────────────────────────────────────────
@@ -73,15 +75,15 @@ class AgentOrchestrator:
         await self.connect()
         return self
 
-    async def __aexit__(self, *_) -> None:
+    async def __aexit__(self, *_: Any) -> None:
         await self.close()
 
     # ── message routing ────────────────────────────────────────────────────────
 
-    def _make_handler(self, subject: str):
+    def _make_handler(self, subject: str) -> Callable[[Any], Coroutine[Any, Any, None]]:
         """Return a NATS message handler that resolves the pending future for
         the arriving ticket_id on this subject."""
-        async def _handler(msg) -> None:
+        async def _handler(msg: Any) -> None:
             try:
                 data = json.loads(msg.data)
             except json.JSONDecodeError:
@@ -97,7 +99,7 @@ class AgentOrchestrator:
 
         return _handler
 
-    async def _handle_audit(self, msg) -> None:
+    async def _handle_audit(self, msg: Any) -> None:
         """Consume escalation audit events so they are not silently discarded."""
         try:
             data = json.loads(msg.data)
@@ -110,7 +112,7 @@ class AgentOrchestrator:
         except Exception as exc:
             logger.warning("audit handler error: %s", exc)
 
-    async def _handle_incoming(self, msg) -> None:
+    async def _handle_incoming(self, msg: Any) -> None:
         """Handle manually submitted tickets from the dashboard."""
         try:
             data = json.loads(msg.data)
@@ -326,8 +328,11 @@ class AgentOrchestrator:
                 await self._redis.ltrim("tickets:history", 0, 49)
             except Exception as exc:
                 logger.warning("ticket history save failed: %s", exc)
-        logger.info("completed ticket_id=%s outcome=%s latency_ms=%d",
-                    ticket_id, outcome_type, result["latency_ms"])
+        self._processed_count += 1
+        logger.info(
+            "completed ticket_id=%s outcome=%s latency_ms=%d processed_total=%d",
+            ticket_id, outcome_type, result["latency_ms"], self._processed_count,
+        )
         return result
 
 

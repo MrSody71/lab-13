@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EscalationOutput",
+  "description": "Escalation result published to tickets.escalated; audit entry also published to tickets.audit",
+  "type": "object",
+  "required": ["ticket_id", "escalation_id", "escalated_to", "priority", "notify_within", "timestamp"],
+  "additionalProperties": false,
+  "properties": {
+    "ticket_id":     { "type": "string" },
+    "escalation_id": { "type": "string", "description": "UUID v4 uniquely identifying this escalation event" },
+    "escalated_to": {
+      "type": "string",
+      "enum": ["L1_SUPPORT", "L2_SUPPORT", "L3_SUPPORT", "NETWORK_OPS"],
+      "description": "Support tier selected by routing rules"
+    },
+    "priority":  { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+    "notify_within": {
+      "type": "string",
+      "description": "SLA notification deadline (e.g. '15 minutes', '30 minutes', '1 hour', '4 hours')"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC ISO-8601 timestamp of the escalation event"
+    }
+  }
+}

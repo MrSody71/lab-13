@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ClassifierInput",
+  "description": "Ticket payload sent to tickets.classify by the orchestrator",
+  "type": "object",
+  "required": ["ticket_id", "title", "description"],
+  "additionalProperties": false,
+  "properties": {
+    "ticket_id": {
+      "type": "string",
+      "description": "Unique ticket identifier (e.g. DEMO-001, MANUAL-ABC12345)"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "Short summary of the support request"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "Full description of the problem"
+    }
+  }
+}

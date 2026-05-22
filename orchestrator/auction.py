@@ -15,6 +15,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ class AuctionOrchestrator(_Base):  # type: ignore[misc]
         bid_subject = f"agents.bid_response.{task_id}"
         bids: list[Bid] = []
 
-        async def _collect(msg) -> None:
+        async def _collect(msg: Any) -> None:
             try:
                 data = json.loads(msg.data)
                 bids.append(Bid(

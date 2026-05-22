@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "KnowledgeOutput",
+  "description": "Solution search result published to tickets.solution_found",
+  "type": "object",
+  "required": ["ticket_id", "found", "articles"],
+  "additionalProperties": false,
+  "properties": {
+    "ticket_id": {
+      "type": "string"
+    },
+    "found": {
+      "type": "boolean",
+      "description": "True when at least one article scored above the threshold"
+    },
+    "articles": {
+      "type": "array",
+      "description": "Top-3 KB articles sorted by score descending (empty when found=false)",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "content", "category", "score"],
+        "properties": {
+          "id":       { "type": "string" },
+          "title":    { "type": "string" },
+          "content":  { "type": "string" },
+          "category": { "type": "string" },
+          "score": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0
+          }
+        }
+      }
+    }
+  }
+}

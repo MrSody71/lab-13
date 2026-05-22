@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ResponderInput",
+  "description": "Response-generation request sent to tickets.generate_response",
+  "type": "object",
+  "required": ["ticket_id", "category", "priority", "articles", "title"],
+  "additionalProperties": false,
+  "properties": {
+    "ticket_id": { "type": "string" },
+    "category":  { "type": "string", "enum": ["network", "hardware", "software", "account", "other"] },
+    "priority":  { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+    "title":     { "type": "string" },
+    "articles": {
+      "type": "array",
+      "description": "KB articles to reference in the response (score > 0.5 are included)",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "score"],
+        "properties": {
+          "id":    { "type": "string" },
+          "title": { "type": "string" },
+          "score": { "type": "number" }
+        }
+      }
+    }
+  }
+}

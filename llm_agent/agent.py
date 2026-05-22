@@ -8,6 +8,7 @@ import logging
 import os
 import socket
 import time
+from typing import Any
 
 import nats
 from dotenv import load_dotenv
@@ -56,8 +57,8 @@ class LLMSupportAgent:
             }).encode()
             try:
                 await self._nc.publish("agents.heartbeat", hb)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("heartbeat publish error: %s", exc)
             await asyncio.sleep(5)
 
     async def close(self) -> None:
@@ -68,10 +69,10 @@ class LLMSupportAgent:
         await self.connect()
         return self
 
-    async def __aexit__(self, *_) -> None:
+    async def __aexit__(self, *_: Any) -> None:
         await self.close()
 
-    async def _handle(self, msg) -> None:
+    async def _handle(self, msg: Any) -> None:
         try:
             data = json.loads(msg.data)
         except json.JSONDecodeError:

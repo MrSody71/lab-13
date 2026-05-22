@@ -13,7 +13,7 @@ import pytest
 # auction_test.py installs a partial pipeline stub into sys.modules before us
 # (alphabetical collection order). Evict it so we import the real module.
 sys.modules.pop("pipeline", None)
-from pipeline import Pipeline, PipelineStep
+from pipeline import Pipeline, PipelineStep  # noqa: E402
 
 
 # ── PipelineStep ───────────────────────────────────────────────────────────────

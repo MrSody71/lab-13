@@ -184,3 +184,13 @@ updated with cp .env.example .env step, pipeline_test.py added to project tree, 
 Development Log section linking prompt_log.md. All 8 task implementations verified
 present. CI: all 6 jobs green (lint-go ×4, lint-python, docker-build). No secrets
 detected. docker-compose.yml valid with name: lab13-mas-support anchor.
+
+---
+
+**Prompt:** Проверь и исправь оставшийся провал CI: lint-python завершается с exit
+code 2. Обнови промт лог и сделай коммит.
+
+**Result:** Проверка GitHub Actions показала, что последний коммит eaad201 уже прошёл
+все проверки: lint-go ×4, lint-python, docker-build — все success, overall: success.
+Ошибка относилась к предыдущему коммиту и была уже исправлена (evict pipeline/main
+стабов в pipeline_test.py). prompt_log.md обновлён, изменения закоммичены.

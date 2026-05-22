@@ -150,6 +150,9 @@ _otel_trace.StatusCode = type("StatusCode", (), {"ERROR": "ERROR"})  # type: ign
 
 sys.modules.setdefault("pipeline", __import__("pipeline"))
 
+# auction_test.py also stubs sys.modules["main"] (only AgentOrchestrator, no
+# _build_payload). Evict it so we import the real main.py below.
+sys.modules.pop("main", None)
 from main import _build_payload  # noqa: E402
 
 
